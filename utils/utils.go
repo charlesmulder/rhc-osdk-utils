@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -114,7 +115,12 @@ func (u *Updater) Apply(ctx context.Context, cl client.Client, obj client.Object
 
 	if *u {
 		// Log.Info("Updating resource", "namespace", meta.GetNamespace(), "name", meta.GetName(), "kind", kind)
-		err = cl.Update(ctx, obj)
+		// RetryOnConflict handles k8s optimistic concurrency conflicts (HTTP 409). Without it,
+		// a conflict causes the reconciler to requeue with the same stale object, producing an
+		// indefinite retry loop. RetryOnConflict retries with backoff until the update succeeds.
+		err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			return cl.Update(ctx, obj)
+		})
 	} else {
 		if meta.GetName() == "" {
 			return nil

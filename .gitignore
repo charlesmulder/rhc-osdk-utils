@@ -1,2 +1,5 @@
 cover.out
 .vscode
+
+# Project tmp folder
+/tmp
