@@ -9,7 +9,7 @@ import (
 	zzap "go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	pgm "github.com/redhatinsights/platform-go-middlewares/logging/cloudwatch"
+	pgm "github.com/redhatinsights/platform-go-middlewares/v2/logging/cloudwatch"
 )
 
 // buildCore creates the zapcore.Core with console and optional CloudWatch outputs
@@ -29,15 +29,24 @@ func buildCore(disableCloudwatch bool, levelEnabler zapcore.LevelEnabler) (zapco
 	}
 	region := os.Getenv("AWS_CW_REGION")
 
+	endpoint := os.Getenv("AWS_CW_ENDPOINT")
+
 	if !disableCloudwatch && key != "" {
 		cred := credentials.NewStaticCredentials(key, secret, "")
 		cfg := aws.NewConfig().WithRegion(region).WithCredentials(cred)
-		cwLogger, err := pgm.NewBatchingHook(group, stream, cfg, time.Second*5)
+		if endpoint != "" {
+			cfg = cfg.WithEndpoint(endpoint)
+		}
+		bw, err := pgm.NewBatchWriterWithDuration(group, stream, cfg, time.Second*5)
 
 		if err != nil {
 			return nil, err
 		}
 
+		// NewZapWriteSyncer wraps *BatchWriter to satisfy zapcore.WriteSyncer,
+		// delegating Sync() to Flush() so that logger.Sync() at shutdown and on
+		// Fatal/Panic log events drains the batch buffer to CloudWatch.
+		cwLogger := pgm.NewZapWriteSyncer(bw)
 		core = zapcore.NewTee(
 			zapcore.NewCore(consoleEncoder, consoleOutput, levelEnabler),
 			zapcore.NewCore(consoleEncoder, cwLogger, levelEnabler),
